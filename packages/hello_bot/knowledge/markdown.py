@@ -5,7 +5,6 @@ from pathlib import Path
 
 from hello_bot.knowledge.models import KnowledgeHit
 
-
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 REQUIRED_FIELDS = {"id", "title", "area", "status"}
 TOKEN_PATTERN = re.compile(r"\w+", re.UNICODE)
@@ -64,7 +63,9 @@ def _read_document(path: Path) -> tuple[dict[str, str], list[tuple[str, str]]]:
             body.append(line)
     if heading is not None:
         sections.append((heading, "\n".join(body).strip()))
-    if metadata["status"] == "published" and (not sections or any(not title or not text for title, text in sections)):
+    if metadata["status"] == "published" and (
+        not sections or any(not title or not text for title, text in sections)
+    ):
         raise ValueError(f"{path}: опубликованный документ содержит пустой раздел")
     if len({title for title, _ in sections}) != len(sections):
         raise ValueError(f"{path}: повторный заголовок раздела")
@@ -74,9 +75,10 @@ def _read_document(path: Path) -> tuple[dict[str, str], list[tuple[str, str]]]:
 class MarkdownKnowledge:
     """Load published Markdown once, then search it without external services."""
 
-    def __init__(self, root: Path):
+    def __init__(self, root: Path, *, repository_root: Path | None = None) -> None:
+        repository = (repository_root or REPOSITORY_ROOT).resolve()
         resolved_root = root.resolve()
-        if not resolved_root.is_relative_to(REPOSITORY_ROOT):
+        if not resolved_root.is_relative_to(repository):
             raise ValueError("Каталог знаний должен находиться внутри репозитория")
         if not resolved_root.is_dir():
             raise ValueError(f"Каталог знаний не найден: {root}")
@@ -92,7 +94,7 @@ class MarkdownKnowledge:
             ids.add(document_id)
             if metadata["status"] != "published":
                 continue
-            source_path = path.relative_to(REPOSITORY_ROOT).as_posix()
+            source_path = path.relative_to(repository).as_posix()
             if len(source_path) > MAX_SOURCE_PATH_LENGTH:
                 raise ValueError(f"{path}: слишком длинный путь к источнику")
             found.extend(
@@ -108,7 +110,9 @@ class MarkdownKnowledge:
             )
         self.sections = tuple(found)
 
-    async def search(self, query: str, area: str | None = None, limit: int = 5) -> list[KnowledgeHit]:
+    async def search(
+        self, query: str, area: str | None = None, limit: int = 5
+    ) -> list[KnowledgeHit]:
         query_tokens = _tokens(query)
         if len(query_tokens) < 2 or limit <= 0:
             return []

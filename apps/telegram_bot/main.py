@@ -2,25 +2,49 @@
 
 import argparse
 import asyncio
+import io
 import json
 import os
 import sys
+from collections.abc import Iterable
 from pathlib import Path
 
-
-ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / "packages"))
-
-from hello_bot.channels.telegram.adapter import TelegramAdapter, TelegramApiError, TelegramClient, parse_update
-from hello_bot.conversations.answer_from_knowledge import answer, process_update
+from hello_bot.channels.contracts import ChannelAdapter
+from hello_bot.channels.telegram.adapter import (
+    TelegramAdapter,
+    TelegramApiError,
+    TelegramClient,
+    parse_update,
+)
+from hello_bot.conversations.answer_from_knowledge import DeliveryStateError, answer, process_update
+from hello_bot.knowledge.contracts import KnowledgeSearch
 from hello_bot.knowledge.markdown import MarkdownKnowledge
+from hello_bot.storage.contracts import EventStore
 from hello_bot.storage.sqlite_events import SQLiteEventStore
 
+ROOT = Path(__file__).resolve().parents[2]
 
-async def process_batch(updates, sender, events, knowledge, offset: int | None) -> int | None:
+
+def _update_id(payload: bytes) -> int:
+    update = json.loads(payload)
+    if not isinstance(update, dict):
+        raise ValueError("Telegram update должен быть объектом")
+    event_id = update.get("update_id")
+    if type(event_id) is not int or event_id < 0:
+        raise ValueError("Некорректный update_id")
+    return event_id
+
+
+async def process_batch(
+    updates: Iterable[bytes],
+    sender: ChannelAdapter,
+    events: EventStore,
+    knowledge: KnowledgeSearch,
+    offset: int | None,
+) -> int | None:
     """Process in update-id order, stopping before acknowledging a failed send."""
-    for payload in sorted(updates, key=lambda item: json.loads(item)["update_id"]):
-        update_id = json.loads(payload)["update_id"]
+    for payload in sorted(updates, key=_update_id):
+        update_id = _update_id(payload)
         if not await process_update(payload, sender, events, knowledge):
             break
         offset = update_id + 1
@@ -37,7 +61,8 @@ async def run_demo(update_path: Path, knowledge: MarkdownKnowledge) -> int:
         print("Демо-событие не содержит личного текстового сообщения", file=sys.stderr)
         return 2
     response = await answer(message, knowledge)
-    sys.stdout.reconfigure(encoding="utf-8")
+    if isinstance(sys.stdout, io.TextIOWrapper):
+        sys.stdout.reconfigure(encoding="utf-8")
     print(response.text)
     return 0
 
@@ -50,7 +75,10 @@ async def run_polling(knowledge: MarkdownKnowledge, db_path: Path) -> int:
     client = TelegramClient(token)
     try:
         if await client.get_webhook_url():
-            print("У бота установлен webhook. Проверьте getWebhookInfo и удалите webhook вручную перед polling.", file=sys.stderr)
+            print(
+                "У бота установлен webhook. Проверьте getWebhookInfo и удалите webhook вручную перед polling.",
+                file=sys.stderr,
+            )
             return 2
     except TelegramApiError as exc:
         print(str(exc), file=sys.stderr)
@@ -60,7 +88,12 @@ async def run_polling(knowledge: MarkdownKnowledge, db_path: Path) -> int:
     events = SQLiteEventStore(db_path)
     offset = None
     try:
-        await events.recover_pending()
+        if await events.has_pending():
+            print(
+                "Есть pending-события с неизвестным исходом. Проверьте доставку и согласуйте восстановление перед запуском.",
+                file=sys.stderr,
+            )
+            return 2
         while True:
             try:
                 updates = await client.get_updates(offset)
@@ -69,7 +102,10 @@ async def run_polling(knowledge: MarkdownKnowledge, db_path: Path) -> int:
                 if updates and offset == previous:
                     await asyncio.sleep(2)
             except (TelegramApiError, OSError, ValueError) as exc:
-                print(f"Ошибка polling: {exc}", file=sys.stderr)
+                print(
+                    f"Ошибка polling ({type(exc).__name__}); повтор получения событий",
+                    file=sys.stderr,
+                )
                 await asyncio.sleep(2)
     finally:
         events.close()
@@ -81,11 +117,24 @@ async def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--knowledge-dir", type=Path, default=Path("knowledge"))
     parser.add_argument("--db-path", type=Path, default=Path(".local/events.sqlite3"))
     args = parser.parse_args(argv)
-    knowledge = MarkdownKnowledge(_repository_path(args.knowledge_dir))
-    if args.demo_update:
-        return await run_demo(_repository_path(args.demo_update), knowledge)
-    return await run_polling(knowledge, _repository_path(args.db_path))
+    try:
+        knowledge = MarkdownKnowledge(_repository_path(args.knowledge_dir), repository_root=ROOT)
+        if args.demo_update:
+            return await run_demo(_repository_path(args.demo_update), knowledge)
+        return await run_polling(knowledge, _repository_path(args.db_path))
+    except DeliveryStateError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    except (OSError, ValueError):
+        print(
+            "Ошибка конфигурации или данных; проверьте пути, Markdown и формат события",
+            file=sys.stderr,
+        )
+        return 2
 
 
 if __name__ == "__main__":
-    raise SystemExit(asyncio.run(main()))
+    try:
+        raise SystemExit(asyncio.run(main()))
+    except KeyboardInterrupt:
+        raise SystemExit(130) from None

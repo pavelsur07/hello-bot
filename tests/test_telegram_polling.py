@@ -2,16 +2,23 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
-from apps.telegram_bot.main import process_batch
+from apps.telegram_bot.main import process_batch, run_polling
+
 from hello_bot.channels.telegram.adapter import parse_update
+from hello_bot.core import Channel
 from hello_bot.knowledge.markdown import MarkdownKnowledge
 from hello_bot.knowledge.models import KnowledgeHit
 from hello_bot.storage.sqlite_events import SQLiteEventStore
 
-
 ROOT = Path(__file__).resolve().parents[1]
-CASES = {case["name"]: case["update"] for case in json.loads((ROOT / "tests" / "fixtures" / "telegram_updates.json").read_text(encoding="utf-8"))["cases"]}
+CASES = {
+    case["name"]: case["update"]
+    for case in json.loads(
+        (ROOT / "tests" / "fixtures" / "telegram_updates.json").read_text(encoding="utf-8")
+    )["cases"]
+}
 
 
 def payload(name: str) -> bytes:
@@ -36,10 +43,40 @@ class FakeSender:
 
 class LongKnowledge:
     async def search(self, query, area=None, limit=5):
-        return [KnowledgeHit("long-article", "examples/knowledge/long.md", "Длинный раздел", "Условие. " * 700, "Длинная статья", "support")]
+        return [
+            KnowledgeHit(
+                "long-article",
+                "examples/knowledge/long.md",
+                "Длинный раздел",
+                "Условие. " * 700,
+                "Длинная статья",
+                "support",
+            )
+        ]
 
 
 class PollingBatchTests(unittest.IsolatedAsyncioTestCase):
+    async def test_restart_with_pending_delivery_requires_manual_reconciliation(self):
+        await self.store.claim(Channel.TELEGRAM, "810001")
+
+        class Client:
+            def __init__(self, token):
+                pass
+
+            async def get_webhook_url(self):
+                return ""
+
+            async def get_updates(self, offset):
+                raise AssertionError("Pending deliveries must be reconciled before polling")
+
+        with (
+            patch("apps.telegram_bot.main.TelegramClient", Client),
+            patch.dict("os.environ", {"TELEGRAM_BOT_TOKEN": "test-token"}),
+        ):
+            result = await run_polling(self.knowledge, Path(self.directory.name, "events.sqlite3"))
+        self.assertEqual(result, 2)
+        self.assertFalse(await self.store.claim(Channel.TELEGRAM, "810001"))
+
     async def asyncSetUp(self):
         self.directory = tempfile.TemporaryDirectory(dir=ROOT)
         self.store = SQLiteEventStore(Path(self.directory.name, "events.sqlite3"))
@@ -52,20 +89,30 @@ class PollingBatchTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_sorted_batch_stops_at_first_send_failure(self):
         self.sender.fail_event = "810002"
-        updates = [payload("non_text_message"), payload("unknown_question"), payload("delivery_question")]
+        updates = [
+            payload("non_text_message"),
+            payload("unknown_question"),
+            payload("delivery_question"),
+        ]
         offset = await process_batch(updates, self.sender, self.store, self.knowledge, None)
         self.assertEqual(offset, 810002)
         self.assertEqual(self.sender.sent, ["810001"])
 
     async def test_non_text_event_advances_offset(self):
-        offset = await process_batch([payload("non_text_message")], self.sender, self.store, self.knowledge, None)
+        offset = await process_batch(
+            [payload("non_text_message")], self.sender, self.store, self.knowledge, None
+        )
         self.assertEqual(offset, 810004)
         self.assertEqual(self.sender.sent, [])
 
     async def test_completed_duplicate_advances_offset_without_sending_again(self):
         update = payload("delivery_question")
-        self.assertEqual(await process_batch([update], self.sender, self.store, self.knowledge, None), 810002)
-        self.assertEqual(await process_batch([update], self.sender, self.store, self.knowledge, None), 810002)
+        self.assertEqual(
+            await process_batch([update], self.sender, self.store, self.knowledge, None), 810002
+        )
+        self.assertEqual(
+            await process_batch([update], self.sender, self.store, self.knowledge, None), 810002
+        )
         self.assertEqual(self.sender.sent, ["810001"])
 
     async def test_long_answer_does_not_block_next_update(self):

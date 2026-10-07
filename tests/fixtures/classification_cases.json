@@ -1,0 +1,11 @@
+{
+  "synthetic": true,
+  "status": "evaluation cases for a future classifier; not a passing Jev evaluation",
+  "cases": [
+    {"id": "sales-price", "text": "Сколько стоит набор открыток?", "acceptable_intents": ["sales"]},
+    {"id": "support-order", "text": "Заказ не пришёл, как проверить доставку?", "acceptable_intents": ["support"]},
+    {"id": "other-greeting", "text": "Добрый день!", "acceptable_intents": ["other"]},
+    {"id": "uncertain-short", "text": "Помогите с доставкой", "acceptable_intents": ["sales", "support"], "low_confidence_action": "clarify_or_human"},
+    {"id": "uncertain-mixed", "text": "Хочу новый набор, но прошлый ещё не пришёл", "acceptable_intents": ["sales", "support"], "low_confidence_action": "clarify_or_human"}
+  ]
+}

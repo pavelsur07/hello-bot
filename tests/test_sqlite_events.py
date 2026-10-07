@@ -5,7 +5,6 @@ from pathlib import Path
 from hello_bot.core import Channel
 from hello_bot.storage.sqlite_events import SQLiteEventStore
 
-
 ROOT = Path(__file__).resolve().parents[1]
 
 

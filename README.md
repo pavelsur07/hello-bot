@@ -1,76 +1,96 @@
 # Hello Bot
 
-Модульный монолит для общения с клиентами через веб-чат, Telegram и MAX.
-Исходные знания хранятся в Markdown. Первый рабочий сценарий принимает личные
-текстовые сообщения Telegram, ищет опубликованный раздел и отвечает со ссылкой
-на источник. Jev, OpenAI, Kimi и остальные каналы подключаются в следующих этапах.
+Модульный монолит на Python 3.12+. Текущий MVP получает личные текстовые
+сообщения Telegram через long polling, ищет опубликованный Markdown-раздел
+и отправляет ответ с источником. Нет ответа — предлагает уточнить вопрос
+или обратиться к оператору.
 
-## Структура
+Jev, OpenAI, Kimi, веб-чат, MAX и автоматическая передача человеку пока
+не подключены. Границы и критерии — в [docs/mvp.md](docs/mvp.md),
+модули — в [docs/architecture.md](docs/architecture.md).
 
-```text
-apps/
-  api/                 HTTP-вход для веб-чата и вебхуков
-  telegram_bot/        Первый сценарий: демо и long polling
-  worker/              Фоновая обработка Markdown-файлов
-packages/hello_bot/
-  core/                Общие модели сообщений
-  channels/            Контракты каналов
-  routing/             Категории обращений и классификация
-  conversations/       Сценарии продаж, поддержки и прочих обращений
-  knowledge/           Контракты индексации и поиска знаний
-  ai/                  Контракты Jev и генераторов текста
-  storage/             Контракты хранения
-knowledge/             Исходные Markdown-файлы
-docs/                  Архитектура и правила проекта
-tests/                 Проверки поведения по мере реализации
-```
+## Установка
 
-Первый сценарий использует локальный индекс Markdown в памяти и SQLite для
-статуса Telegram-событий. Вебхуки, worker и вызовы моделей ещё не реализованы.
-
-## Локальная установка
-
-Требуется Python 3.12 или новее. Для запуска первого сценария внешние пакеты
-не нужны. Из корня репозитория в PowerShell:
+Из корня репозитория в PowerShell; активация среды не нужна:
 
 ```powershell
-$env:PYTHONPATH = 'packages'
-python -m unittest discover -s tests -v
-python apps/telegram_bot/main.py --demo-update examples/demo_update.json --knowledge-dir examples/knowledge
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+.\.venv\Scripts\python.exe -m pip install --no-build-isolation --no-deps -e .
 ```
 
-Демо использует только вымышленные сведения из `examples/knowledge/`; рабочий
-каталог `knowledge/` в нём не участвует.
+Linux/macOS: используйте .venv/bin/python вместо .venv\Scripts\python.exe.
+Версии инструментов и их зависимостей зафиксированы. Для работы бота внешние
+пакеты не нужны; Ruff, mypy и build используются только при разработке.
+Первоначальная установка требует доступа к PyPI.
+
+## Демо без ключей и сети
+
+```powershell
+.\.venv\Scripts\python.exe apps/telegram_bot/main.py --demo-update examples/demo_update.json --knowledge-dir examples/knowledge
+```
+
+Ожидается ответ о доставке за 300 ₽ со ссылкой на раздел. Демо использует
+вымышленные знания; рабочий каталог knowledge/ не подключается автоматически.
+
+## Единая проверка
+
+```powershell
+.\.venv\Scripts\python.exe scripts/check.py
+```
+
+Эту же команду запускает GitHub Actions для Python 3.12 и 3.14.
+Она проверяет форматирование, линтер, типы, архитектурные импорты и unittest,
+собирает sdist/wheel, устанавливает wheel в отдельную среду и запускает демо.
+Проверки не требуют токенов или сети после установки инструментов.
+Артефакты находятся в .local/; пользовательский dist/ не удаляется.
+Wheel содержит библиотеку hello_bot; CLI, документация и примеры — в
+репозитории и sdist. Демо при проверке использует установленную библиотеку.
+
+Форматирование: python -m ruff format .
+Отдельные тесты: python -m unittest tests.test_telegram_flow -v
+(обе команды выполнять Python из .venv).
 
 ## Telegram long polling
 
-Создайте тестового бота и задайте токен в окружении, не в командной строке:
+Добавьте опубликованные статьи в knowledge/ по
+[KNOWLEDGE_RULES.md](KNOWLEDGE_RULES.md). Только TELEGRAM_BOT_TOKEN читается
+из окружения. [.env.example](.env.example) описывает конфигурацию; приложение
+не загружает .env автоматически. Пути задаются аргументами CLI; относительные
+пути отсчитываются от корня проекта. Ввод токена без литерала в истории:
 
 ```powershell
-$env:TELEGRAM_BOT_TOKEN = '<токен тестового бота>'
-python apps/telegram_bot/main.py --knowledge-dir knowledge --db-path .local/events.sqlite3
+$env:TELEGRAM_BOT_TOKEN = [System.Net.NetworkCredential]::new('', (Read-Host 'Telegram token' -AsSecureString)).Password
+.\.venv\Scripts\python.exe apps/telegram_bot/main.py --knowledge-dir knowledge --db-path .local/events.sqlite3
 ```
 
-До запуска добавьте в `knowledge/` опубликованные статьи по
-[правилам базы знаний](KNOWLEDGE_RULES.md). Если у бота установлен webhook,
-программа откажется запускать polling. Проверьте статус через `getWebhookInfo`
-и вручную удалите webhook перед переключением; эти способы получения событий
-в Telegram взаимоисключающие.
+Один процесс на один токен и файл SQLite. При установленном webhook бот
+отказывается запускать polling; перед переходом проверьте getWebhookInfo
+и вручную удалите webhook. Реальный API проверяется отдельно с тестовым
+ботом; обычные тесты подменяют транспорт.
 
-Запускайте один экземпляр polling-бота на один токен и файл SQLite.
-Повторное событие в обычном ходе не создаёт второй ответ. После аварийного
-завершения между успешным `sendMessage` и записью статуса `sent` возможен
-повторный ответ; Telegram не принимает ключ идемпотентности для `sendMessage`.
-Если запись статуса после отправки не удалась, процесс останавливается, не
-снимая claim: это не запускает немедленную повторную отправку. После перезапуска
-в этом окне повтор всё ещё возможен. Слишком длинный раздел не блокирует
-очередь: бот направляет клиента к оператору и сохраняет источник ответа.
-Локальные тесты не проверяют реальную сеть и токен.
+Повтор отправленного update не создаёт второй ответ. Если отправка завершилась
+таймаутом или статус sent не удалось сохранить, процесс останавливается:
+исход доставки неизвестен. Pending блокирует следующий запуск.
+Проверьте доставку в Telegram; отправленные события отметьте sent,
+подтверждённо неотправленные освободите через EventStore.release.
+Восстановление согласуется отдельно; не удаляйте БД и не сбрасывайте все
+pending ради запуска. Telegram и SQLite не поддерживают общую транзакцию;
+гарантия exactly-once для внешней отправки отсутствует.
 
-Проектные решения и порядок реализации описаны в [docs/architecture.md](docs/architecture.md),
-правила для новых модулей — в [docs/development.md](docs/development.md).
-Агенты разработки следуют [AGENTS.md](AGENTS.md).
+Длинный раздел не блокирует очередь: бот предлагает обратиться к оператору
+и сохраняет источник. После изменения знаний перезапустите бот.
 
-Правила для Markdown-статей описаны в [KNOWLEDGE_RULES.md](KNOWLEDGE_RULES.md).
-План первого сквозного сценария находится в
-[docs/plans/telegram-first-slice.md](docs/plans/telegram-first-slice.md).
+## Структура
+
+- apps/telegram_bot/ — CLI; apps/api/ и apps/worker/ — будущие точки входа.
+- packages/hello_bot/ — core, channels, conversations, knowledge, storage,
+  routing и ai; реализации находятся рядом с контрактами.
+- knowledge/ — рабочие знания; examples/ — вымышленные демонстрационные данные.
+- tests/fixtures/ — синтетические события и будущий набор классификации.
+- scripts/check.py — единая проверка; .github/workflows/ — CI.
+- docs/ — MVP, архитектура, разработка и планы.
+
+Порядок работы — в [docs/development.md](docs/development.md),
+правила агентов — в [AGENTS.md](AGENTS.md).
+[План подготовки](docs/plans/autonomous-development-foundation.md).

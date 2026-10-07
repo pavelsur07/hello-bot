@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=75"]
+requires = ["setuptools==84.0.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -14,5 +14,23 @@ dependencies = []
 where = ["packages"]
 include = ["hello_bot*"]
 
-[tool.pytest.ini_options]
-testpaths = ["tests"]
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["packages"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "B", "UP"]
+
+[tool.mypy]
+python_version = "3.12"
+mypy_path = "packages"
+explicit_package_bases = true
+strict = true
+files = ["packages/hello_bot", "apps", "scripts", "tests"]
+
+[[tool.mypy.overrides]]
+module = ["tests.*"]
+disallow_untyped_defs = false
+disallow_untyped_calls = false
+warn_return_any = false
