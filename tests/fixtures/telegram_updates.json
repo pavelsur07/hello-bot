@@ -1,0 +1,65 @@
+{
+  "cases": [
+    {
+      "name": "delivery_question",
+      "update": {
+        "update_id": 810001,
+        "message": {
+          "message_id": 51,
+          "date": 1791327600,
+          "chat": {"id": 410001, "type": "private"},
+          "from": {"id": 410001, "is_bot": false, "first_name": "Тест"},
+          "text": "Какая стоимость доставки по городу?"
+        }
+      },
+      "expected": {
+        "event_id": "810001",
+        "document_id": "demo-delivery",
+        "section_title": "Стоимость доставки",
+        "answer_contains": "300 ₽"
+      }
+    },
+    {
+      "name": "unknown_question",
+      "update": {
+        "update_id": 810002,
+        "message": {
+          "message_id": 52,
+          "date": 1791327660,
+          "chat": {"id": 410001, "type": "private"},
+          "from": {"id": 410001, "is_bot": false, "first_name": "Тест"},
+          "text": "Вы ремонтируете велосипеды?"
+        }
+      },
+      "expected": {"event_id": "810002", "document_id": null}
+    },
+    {
+      "name": "non_text_message",
+      "update": {
+        "update_id": 810003,
+        "message": {
+          "message_id": 53,
+          "date": 1791327720,
+          "chat": {"id": 410001, "type": "private"},
+          "from": {"id": 410001, "is_bot": false, "first_name": "Тест"},
+          "photo": [{"file_id": "fake-photo-id", "file_unique_id": "fake-unique-id", "width": 1, "height": 1}]
+        }
+      },
+      "expected": {"event_id": "810003", "ignored": true}
+    },
+    {
+      "name": "shared_word_without_answer",
+      "update": {
+        "update_id": 810004,
+        "message": {
+          "message_id": 54,
+          "date": 1791327780,
+          "chat": {"id": 410001, "type": "private"},
+          "from": {"id": 410001, "is_bot": false, "first_name": "Тест"},
+          "text": "Какая стоимость ремонта велосипеда?"
+        }
+      },
+      "expected": {"event_id": "810004", "document_id": null}
+    }
+  ]
+}
