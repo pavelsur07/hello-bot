@@ -7,7 +7,7 @@ from hello_bot.core import Channel
 
 
 class SQLiteEventStore:
-    def __init__(self, path: Path):
+    def __init__(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         self._connection = sqlite3.connect(path, timeout=5)
         self._connection.execute(
@@ -43,8 +43,17 @@ class SQLiteEventStore:
             )
 
     async def recover_pending(self) -> None:
+        """Manually release pending claims only after checking uncertain deliveries."""
         with self._connection:
             self._connection.execute("DELETE FROM events WHERE status = 'pending'")
+
+    async def has_pending(self) -> bool:
+        return (
+            self._connection.execute(
+                "SELECT 1 FROM events WHERE status = 'pending' LIMIT 1"
+            ).fetchone()
+            is not None
+        )
 
     def close(self) -> None:
         self._connection.close()
